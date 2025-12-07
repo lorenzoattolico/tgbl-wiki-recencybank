@@ -4,7 +4,7 @@ RecencyBank: Temporal Heuristic for Link Prediction
 A simple baseline that predicts users will edit the pages they most recently edited.
 Based on the observation that Wikipedia editors exhibit strong temporal locality.
 
-Author: [Your Name]
+Author: Lorenzo Domenico Attolico
 Course: Special Lectures in Mathematical Informatics II
 Dataset: tgbl-wiki from Temporal Graph Benchmark
 """

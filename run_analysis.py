@@ -1,10 +1,10 @@
 """
-TGB-Wiki RecencyBank Analysis
+TGB-Wiki RecencyBank Analysis - Final Version
 
-Complete pipeline for temporal link prediction on tgbl-wiki dataset.
-Includes dataset exploration, model training, evaluation, and visualization.
+Complete pipeline for temporal link prediction with RecencyBank.
+Optimized for clarity, correctness, and professional output.
 
-Author: [Your Name]
+Author: Lorenzo Domenico Attolico
 Course: Special Lectures in Mathematical Informatics II
 """
 
@@ -36,20 +36,19 @@ np.random.seed(RANDOM_SEED)
 Path(OUTPUT_DIR).mkdir(exist_ok=True)
 Path(FIGURES_DIR).mkdir(exist_ok=True)
 
-# Plotting configuration
 plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("husl")
 
 
 def print_section(title):
-    """Print a formatted section header."""
+    """Print formatted section header."""
     print("\n" + "="*80)
     print(title)
     print("="*80 + "\n")
 
 
 def load_and_explore_dataset():
-    """Load tgbl-wiki dataset and perform exploratory analysis."""
+    """Load tgbl-wiki and perform exploration."""
     print_section("Loading Dataset")
     
     dataset = LinkPropPredDataset(name=DATASET_NAME, root=ROOT_DIR)
@@ -62,10 +61,14 @@ def load_and_explore_dataset():
     destinations = edge_list['destinations']
     timestamps = edge_list['timestamps']
     
+    # Temporal span
+    time_span = timestamps[-1] - timestamps[0]
+    days = time_span / 86400  # seconds to days
+    
     print(f"Dataset: {DATASET_NAME}")
     print(f"  Nodes: {num_nodes:,}")
     print(f"  Edges: {num_edges:,}")
-    print(f"  Temporal span: {timestamps[-1] - timestamps[0]:,} time units")
+    print(f"  Temporal span: {time_span:,.0f} seconds (~{days:.1f} days)")
     
     # Get splits
     train_mask = dataset.train_mask
@@ -95,20 +98,29 @@ def load_and_explore_dataset():
     print(f"  Val: {len(val_data['sources']):,} ({len(val_data['sources'])/num_edges*100:.1f}%)")
     print(f"  Test: {len(test_data['sources']):,} ({len(test_data['sources'])/num_edges*100:.1f}%)")
     
-    # Compute degree statistics
+    # Compute degrees
     out_degree = Counter(sources)
     in_degree = Counter(destinations)
     
-    print(f"\nDegree Statistics:")
-    print(f"  Out-degree mean: {np.mean(list(out_degree.values())):.2f}")
-    print(f"  Out-degree max: {max(out_degree.values()):,}")
-    print(f"  In-degree mean: {np.mean(list(in_degree.values())):.2f}")
-    print(f"  In-degree max: {max(in_degree.values()):,}")
+    # Bipartite analysis
+    unique_sources = len(set(train_data['sources']))
+    unique_dests = len(set(train_data['destinations']))
     
-    # User activity stratification
+    print(f"\nGraph Structure:")
+    print(f"  Unique users (sources): {unique_sources:,}")
+    print(f"  Unique pages (destinations): {unique_dests:,}")
+    print(f"  Out-degree mean: {np.mean(list(out_degree.values())):.2f}, max: {max(out_degree.values()):,}")
+    print(f"  In-degree mean: {np.mean(list(in_degree.values())):.2f}, max: {max(in_degree.values()):,}")
+    
+    # Activity stratification thresholds
     out_degrees_list = list(out_degree.values())
     low_threshold = np.percentile(out_degrees_list, 33)
     high_threshold = np.percentile(out_degrees_list, 67)
+    
+    print(f"\nActivity Stratification:")
+    print(f"  Low: ≤{low_threshold:.0f} edits (33rd percentile)")
+    print(f"  Medium: {low_threshold:.0f}-{high_threshold:.0f} edits")
+    print(f"  High: >{high_threshold:.0f} edits (67th percentile)")
     
     return {
         'dataset': dataset,
@@ -122,22 +134,21 @@ def load_and_explore_dataset():
         'sources': sources,
         'destinations': destinations,
         'timestamps': timestamps,
+        'time_span_days': days,
     }
 
 
 def create_visualizations(data_dict):
-    """Generate all visualizations for the report."""
+    """Generate all visualizations."""
     print_section("Generating Visualizations")
     
     out_degree = data_dict['out_degree']
     in_degree = data_dict['in_degree']
-    low_threshold = data_dict['low_threshold']
-    high_threshold = data_dict['high_threshold']
     timestamps = data_dict['timestamps']
     train_data = data_dict['train_data']
     val_data = data_dict['val_data']
     
-    # Figure 1: Degree Distribution
+    # Figure 1: Degree Distribution (NO vertical lines)
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
     out_degrees = list(out_degree.values())
@@ -147,8 +158,6 @@ def create_visualizations(data_dict):
     axes[0].set_title('Out-degree Distribution', fontsize=13, fontweight='bold')
     axes[0].set_yscale('log')
     axes[0].grid(True, alpha=0.3)
-    axes[0].axvline(low_threshold, color='orange', linestyle='--', linewidth=2, alpha=0.7)
-    axes[0].axvline(high_threshold, color='red', linestyle='--', linewidth=2, alpha=0.7)
     
     in_degrees = list(in_degree.values())
     axes[1].hist(in_degrees, bins=50, edgecolor='black', alpha=0.7, color='#e74c3c')
@@ -191,7 +200,7 @@ def create_visualizations(data_dict):
 
 
 def train_recencybank(train_data):
-    """Train RecencyBank on training data."""
+    """Train RecencyBank."""
     print_section("Training RecencyBank")
     
     recency_bank = RecencyBank()
@@ -204,7 +213,7 @@ def train_recencybank(train_data):
     
     stats = recency_bank.get_statistics()
     print(f"Trained on {stats['num_updates']:,} edges")
-    print(f"Tracking {stats['num_sources']:,} sources ({stats['num_sources']/9227*100:.1f}% coverage)")
+    print(f"Tracking {stats['num_sources']:,} unique users")
     
     with open(f"{OUTPUT_DIR}/recency_bank.pkl", 'wb') as f:
         pickle.dump(recency_bank, f)
@@ -213,7 +222,7 @@ def train_recencybank(train_data):
 
 
 def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_threshold, split_name="test"):
-    """Evaluate RecencyBank with failure analysis and activity stratification."""
+    """Evaluate with failure analysis and activity stratification."""
     sources = data['sources']
     destinations = data['destinations']
     timestamps = data['timestamps']
@@ -227,6 +236,7 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
     no_pred_count = 0
     
     activity_predictions = {'low': [], 'medium': [], 'high': []}
+    activity_counts = {'low': 0, 'medium': 0, 'high': 0}
     
     for i in range(len(sources)):
         src = sources[i]
@@ -259,11 +269,14 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
         # Activity stratification
         user_activity = out_degree.get(src, 0)
         if user_activity <= low_threshold:
-            activity_predictions['low'].append(pos_score)
+            level = 'low'
         elif user_activity <= high_threshold:
-            activity_predictions['medium'].append(pos_score)
+            level = 'medium'
         else:
-            activity_predictions['high'].append(pos_score)
+            level = 'high'
+        
+        activity_predictions[level].append(pos_score)
+        activity_counts[level] += 1
     
     # Convert to arrays
     y_pred_pos = np.array(y_pred_pos, dtype=np.float64)
@@ -287,14 +300,17 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
     
     # Activity accuracy
     activity_acc = {}
-    for level, scores in activity_predictions.items():
+    for level in ['low', 'medium', 'high']:
+        scores = activity_predictions[level]
+        count = activity_counts[level]
         if len(scores) > 0:
             activity_acc[level] = {
                 'accuracy': float(np.mean(scores)),
-                'count': len(scores)
+                'count': count,
+                'percentage': count / matched * 100
             }
         else:
-            activity_acc[level] = {'accuracy': 0.0, 'count': 0}
+            activity_acc[level] = {'accuracy': 0.0, 'count': 0, 'percentage': 0.0}
     
     return {
         'metrics': metrics,
@@ -310,7 +326,7 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
 
 
 def create_analysis_visualizations(test_results, val_results):
-    """Create failure analysis and leaderboard comparison figures."""
+    """Create failure analysis and leaderboard figures."""
     print_section("Creating Analysis Visualizations")
     
     # Figure 3: Failure Analysis and Activity Performance
@@ -334,7 +350,7 @@ def create_analysis_visualizations(test_results, val_results):
     
     axes[0].set_title('Prediction Breakdown (Test Set)', fontsize=13, fontweight='bold')
     
-    # Activity bar chart
+    # Activity bar chart with counts
     activity_levels = ['Low', 'Medium', 'High']
     test_accs = [
         test_results['activity_accuracy']['low']['accuracy'],
@@ -345,6 +361,11 @@ def create_analysis_visualizations(test_results, val_results):
         test_results['activity_accuracy']['low']['count'],
         test_results['activity_accuracy']['medium']['count'],
         test_results['activity_accuracy']['high']['count']
+    ]
+    test_pcts = [
+        test_results['activity_accuracy']['low']['percentage'],
+        test_results['activity_accuracy']['medium']['percentage'],
+        test_results['activity_accuracy']['high']['percentage']
     ]
     
     x = np.arange(len(activity_levels))
@@ -359,10 +380,11 @@ def create_analysis_visualizations(test_results, val_results):
     axes[1].set_ylim(0, max(test_accs) * 1.2)
     axes[1].grid(True, alpha=0.3, axis='y')
     
-    for i, (bar, acc, count) in enumerate(zip(bars, test_accs, test_counts)):
+    for i, (bar, acc, count, pct) in enumerate(zip(bars, test_accs, test_counts, test_pcts)):
         height = bar.get_height()
         axes[1].text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                     f'{acc:.3f}\n({count:,})', ha='center', va='bottom', fontsize=10)
+                     f'{acc:.3f}\n({count:,} queries)\n{pct:.1f}%', 
+                     ha='center', va='bottom', fontsize=9)
     
     plt.tight_layout()
     plt.savefig(f"{FIGURES_DIR}/failure_and_activity_analysis.pdf", dpi=300, bbox_inches='tight')
@@ -431,13 +453,13 @@ def main():
     # Load and explore
     data_dict = load_and_explore_dataset()
     
-    # Create dataset visualizations
+    # Create visualizations
     create_visualizations(data_dict)
     
-    # Train model
+    # Train
     recency_bank = train_recencybank(data_dict['train_data'])
     
-    # Load negative samples
+    # Evaluate
     print_section("Evaluating")
     dataset = data_dict['dataset']
     dataset.load_val_ns()
@@ -446,7 +468,6 @@ def main():
     val_neg_samples = dataset.ns_sampler.eval_set.get('val')
     test_neg_samples = dataset.ns_sampler.eval_set.get('test')
     
-    # Evaluate
     val_results = evaluate_model(
         data_dict['val_data'], val_neg_samples, recency_bank,
         data_dict['out_degree'], data_dict['low_threshold'], 
@@ -463,16 +484,17 @@ def main():
     print(f"\nValidation MRR: {val_results['metrics']['mrr']:.3f}")
     print(f"Test MRR: {test_results['metrics']['mrr']:.3f}")
     
-    print(f"\nFailure Analysis:")
+    print(f"\nFailure Breakdown (Test):")
     print(f"  Correct: {test_results['failure_stats']['correct']/test_results['matched']*100:.1f}%")
     print(f"  Incorrect: {test_results['failure_stats']['incorrect']/test_results['matched']*100:.1f}%")
     print(f"  Cold start: {test_results['failure_stats']['no_prediction']/test_results['matched']*100:.1f}%")
     
-    print(f"\nPerformance by User Activity:")
+    print(f"\nPerformance by User Activity (Test):")
     for level in ['high', 'medium', 'low']:
         acc = test_results['activity_accuracy'][level]['accuracy']
         count = test_results['activity_accuracy'][level]['count']
-        print(f"  {level.capitalize()}: {acc:.3f} accuracy ({count:,} queries)")
+        pct = test_results['activity_accuracy'][level]['percentage']
+        print(f"  {level.capitalize()}: {acc:.3f} accuracy ({count:,} queries, {pct:.1f}%)")
     
     # Create analysis visualizations
     create_analysis_visualizations(test_results, val_results)
@@ -480,7 +502,12 @@ def main():
     # Save results
     results = {
         'model': 'RecencyBank',
-        'dataset': DATASET_NAME,
+        'dataset': {
+            'name': DATASET_NAME,
+            'nodes': 9227,
+            'edges': 157474,
+            'time_span_days': data_dict['time_span_days'],
+        },
         'validation': {
             'metrics': {k: float(v) for k, v in val_results['metrics'].items()},
             'failure_stats': val_results['failure_stats'],
