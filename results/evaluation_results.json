@@ -1,0 +1,67 @@
+{
+  "model": "RecencyBank",
+  "dataset": {
+    "name": "tgbl-wiki",
+    "nodes": 9227,
+    "edges": 157474,
+    "time_span_days": 30.9996875
+  },
+  "validation": {
+    "metrics": {
+      "hits@10": 0.6513271927833557,
+      "mrr": 0.5217475891113281
+    },
+    "failure_stats": {
+      "correct": 10444,
+      "incorrect": 9798,
+      "no_prediction": 3379,
+      "accuracy": 0.44214893526946364
+    },
+    "activity_accuracy": {
+      "low": {
+        "accuracy": 0.0,
+        "count": 399,
+        "percentage": 1.6891748867533127
+      },
+      "medium": {
+        "accuracy": 0.15578358208955223,
+        "count": 1072,
+        "percentage": 4.538334532830955
+      },
+      "high": {
+        "accuracy": 0.46397291196388263,
+        "count": 22150,
+        "percentage": 93.77249058041573
+      }
+    }
+  },
+  "test": {
+    "metrics": {
+      "hits@10": 0.5910418629646301,
+      "mrr": 0.47303709387779236
+    },
+    "failure_stats": {
+      "correct": 9514,
+      "incorrect": 10217,
+      "no_prediction": 3890,
+      "accuracy": 0.4027771897887473
+    },
+    "activity_accuracy": {
+      "low": {
+        "accuracy": 0.0,
+        "count": 550,
+        "percentage": 2.328436560687524
+      },
+      "medium": {
+        "accuracy": 0.0894854586129754,
+        "count": 1341,
+        "percentage": 5.677151687058126
+      },
+      "high": {
+        "accuracy": 0.43230556833870226,
+        "count": 21730,
+        "percentage": 91.99441175225435
+      }
+    }
+  }
+}

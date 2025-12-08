@@ -205,15 +205,27 @@ def train_recencybank(train_data):
     
     recency_bank = RecencyBank()
     
-    for i in range(len(train_data['sources'])):
-        src = train_data['sources'][i]
-        dst = train_data['destinations'][i]
-        ts = train_data['timestamps'][i]
+    # Verify if data is already temporally sorted
+    ts = train_data['timestamps']
+    is_sorted = np.all(ts[:-1] <= ts[1:])
+    print(f"Training data temporal ordering: {'already sorted' if is_sorted else 'NOT sorted - will sort'}")
+    
+    # Sort by timestamp using STABLE sort for deterministic results
+    # Mergesort preserves relative order of edges with identical timestamps
+    order = np.argsort(train_data['timestamps'], kind='mergesort')
+    
+    print(f"Processing {len(order):,} edges in chronological order...")
+    
+    for idx in order:
+        src = train_data['sources'][idx]
+        dst = train_data['destinations'][idx]
+        ts = train_data['timestamps'][idx]
         recency_bank.update(src, dst, ts)
     
     stats = recency_bank.get_statistics()
     print(f"Trained on {stats['num_updates']:,} edges")
     print(f"Tracking {stats['num_sources']:,} unique users")
+    print(f"Tracking {stats['num_pairs']:,} unique (user, page) pairs")
     
     with open(f"{OUTPUT_DIR}/recency_bank.pkl", 'wb') as f:
         pickle.dump(recency_bank, f)
@@ -231,6 +243,7 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
     y_pred_neg = []
     matched = 0
     
+    # For failure analysis with TOP-1 prediction
     correct_count = 0
     incorrect_count = 0
     no_pred_count = 0
@@ -238,11 +251,14 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
     activity_predictions = {'low': [], 'medium': [], 'high': []}
     activity_counts = {'low': 0, 'medium': 0, 'high': 0}
     
+    print(f"\nEvaluating {len(sources)} queries on {split_name}...")
+    
     for i in range(len(sources)):
         src = sources[i]
         dst = destinations[i]
         ts = timestamps[i]
         
+        # Get negative samples for this query
         query_key = (src, dst, ts)
         if query_key not in neg_samples:
             continue
@@ -250,21 +266,42 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
         neg_dsts = neg_samples[query_key]
         matched += 1
         
-        pred_dst = model.query(src)
-        
-        pos_score = 1.0 if pred_dst == dst else 0.0
-        neg_scores = [1.0 if pred_dst == neg_dst else 0.0 for neg_dst in neg_dsts]
-        
+        # Score positive edge
+        pos_score = model.score_one(src, dst, ts)
         y_pred_pos.append(pos_score)
+        
+        # Score ALL negative edges
+        neg_scores = model.score_batch(
+            np.full(len(neg_dsts), src, dtype=np.int64),
+            np.array(neg_dsts, dtype=np.int64),
+            np.full(len(neg_dsts), ts, dtype=np.int64)
+        )
         y_pred_neg.append(neg_scores)
         
-        # Failure tracking
-        if pred_dst is None:
+        # ===== FAILURE ANALYSIS =====
+        # For top-1 prediction: find destination with highest score
+        # Check all known destinations for this source
+        if src not in model.last_time or len(model.last_time[src]) == 0:
+            # Cold start: no history for this source
             no_pred_count += 1
-        elif pred_dst == dst:
-            correct_count += 1
+            is_correct = False
         else:
-            incorrect_count += 1
+            # Find destination with highest score among known destinations
+            best_dst = None
+            best_score = -np.inf
+            
+            for candidate_dst in model.last_time[src].keys():
+                score = model.score_one(src, candidate_dst, ts)
+                if score > best_score:
+                    best_score = score
+                    best_dst = candidate_dst
+            
+            if best_dst == dst:
+                correct_count += 1
+                is_correct = True
+            else:
+                incorrect_count += 1
+                is_correct = False
         
         # Activity stratification
         user_activity = out_degree.get(src, 0)
@@ -275,19 +312,25 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
         else:
             level = 'high'
         
-        activity_predictions[level].append(pos_score)
+        activity_predictions[level].append(1.0 if is_correct else 0.0)
         activity_counts[level] += 1
+        
+        if (i + 1) % 5000 == 0:
+            print(f"  Processed {i+1}/{len(sources)} queries...")
     
-    # Convert to arrays
+    print(f"  Matched {matched} queries with negative samples\n")
+    
+    # Convert to arrays for TGB Evaluator
     y_pred_pos = np.array(y_pred_pos, dtype=np.float64)
     
+    # Pad ragged negatives to dense array
     max_len = max(len(negs) for negs in y_pred_neg)
-    y_pred_neg_array = np.full((len(y_pred_neg), max_len), -np.inf, dtype=np.float64)
+    y_pred_neg_array = np.zeros((len(y_pred_neg), max_len), dtype=np.float64)
     
     for i, negs in enumerate(y_pred_neg):
         y_pred_neg_array[i, :len(negs)] = negs
     
-    # Evaluate
+    # Evaluate with TGB official evaluator
     evaluator = Evaluator(name=DATASET_NAME)
     
     input_dict = {
@@ -323,7 +366,6 @@ def evaluate_model(data, neg_samples, model, out_degree, low_threshold, high_thr
         },
         'activity_accuracy': activity_acc,
     }
-
 
 def create_analysis_visualizations(test_results, val_results):
     """Create failure analysis and leaderboard figures."""
